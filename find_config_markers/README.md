@@ -14,7 +14,7 @@ Find sections within configuration files that are enclosed with special markers
 Often you'll change some configuration option and then, when you want to change it again, you can't find it anymore. To avoid exactly that, I created this script.
 
 Let's look at an ssh server configuration I adjusted a while ago to show how it works. Below you see a shortened version of an openssh server configuration.
-As you can see there are two sections marked using '''# -- mark begin --''' and '''# -- mark end --'''.
+As you can see there are two sections marked using **# -- mark begin --** and **# -- mark end --**.
 
 ```
 # Change to yes to enable challenge-response passwords (beware issues with
@@ -48,7 +48,7 @@ Match Group srv-backup
 
 ```
 
-Now we use '''find_config_markers /etc/ssh/sshd_config''' to just look at the part enclosed by the markers. Here's the output:
+Now we use **find_config_markers /etc/ssh/sshd_config** to just look at the part enclosed by the markers. Here's the output:
 
 ```
       52 | PasswordAuthentication no
