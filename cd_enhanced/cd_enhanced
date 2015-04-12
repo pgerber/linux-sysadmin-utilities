@@ -1,0 +1,863 @@
+#
+#     This is a bash code fragment
+#
+#
+#     This program is free software: you can redistribute it and/or modify
+#     it under the terms of the GNU General Public License as published by
+#     the Free Software Foundation, either version 3 of the License, or
+#     (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful,
+#     but WITHOUT ANY WARRANTY; without even the implied warranty of
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#     GNU General Public License for more details.
+#
+#     You should have received a copy of the GNU General Public License
+#     along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#     © 2014 Peter Gerber <peter@arbitrary.ch>
+
+
+
+__pg_cd__config_path=~/.config/pg_cd
+__pg_cd__link_path="$__pg_cd__config_path/links"
+
+
+mkdir -p -- "$__pg_cd__link_path" "$__pg_cd__config_path"
+
+
+
+if ! [ "$(type -t _init_completion)" = "function" ]; then
+	_init_completion() { :; }
+fi
+
+
+# Entry name completion
+__pg_cd__complete_entry_name()
+{
+	local cur prev words cword
+	_init_completion || return
+
+	local extend_dirs_only=1
+	__pg_cd__entry_name_completion__helper "$@"
+}
+
+
+# Entry name completion. Limited to the first argument.
+__pg_cd__complete_first_entry_name()
+{
+	local cur prev words cword
+	_init_completion || return
+
+	if (( $COMP_CWORD > 1 )); then
+		return 1
+	fi
+
+	local extend_dirs_only=1
+	__pg_cd__entry_name_completion__helper "$@"
+}
+
+
+# Entry name and directory path completion. Limited to the first argument.
+__pg_cd__complete_first_entry_name_and_dirpath()
+{
+	local cur prev words cword
+	_init_completion || return
+
+	if (( $COMP_CWORD > 1 )); then
+		return 1
+	fi
+
+	local extend_dirs_only=1
+	__pg_cd__entry_name_and_path_completion__helper "$@"
+}
+
+
+# Entry name and file path completion. Limited to the first argument.
+__pg_cd__complete_first_entry_name_and_filepath()
+{
+	local cur prev words cword
+	_init_completion || return
+
+	if (( $COMP_CWORD > 1 )); then
+		return 1
+	fi
+
+	local extend_dirs_only=0
+	__pg_cd__entry_name_and_path_completion__helper "$@"
+}
+
+
+# Entry name and directory path completion.
+__pg_cd__complete_entry_name_and_dirpath()
+{
+	local cur prev words cword
+	_init_completion || return
+
+	local extend_dirs_only=1
+	__pg_cd__entry_name_and_path_completion__helper "$@"
+}
+
+
+# Helper used to complete entry name.
+# Do not call directly
+__pg_cd__entry_name_completion__helper()
+{
+	local -i i=0
+
+
+	if [[ "$2" == */* ]]; then
+		return 1
+	fi
+
+
+ 	local shopt_store="$(__pg_cd__shopts_save)"
+		shopt -s nullglob
+		shopt -s dotglob
+
+		local names; __pg_cd__get_entries_starting_with names "$2"
+ 	__pg_cd__shopts_restore "$shopt_store"
+
+ 	local name_full
+ 	for name_full in "${names[@]}"
+		do
+			local name="$(basename -- "$name_full")"
+			local -i hit=0
+
+			if [[ "$name" == @(.|..) ]]; then
+				continue
+			fi
+
+			local word
+			for word in "${COMP_WORDS[@]:1}"
+				do
+					if [ "$word" == "$name" ] && [ "${COMP_WORDS[COMP_CWORD]}" != "$name" ]; then
+						hit=1
+						break
+					fi
+				done
+
+			if (( $hit == 0 )); then
+				COMPREPLY+=("$name")
+			fi
+		done
+
+	return "${#names[@]}"		# true if there is nothing to complete anymore
+}
+
+
+# Helper used to complete entry name and path.
+# Do not call directly
+__pg_cd__entry_name_and_path_completion__helper()
+{
+	if [[ "$2" == ?(.) ]]; then
+		COMPREPLY+=(. ..)
+	fi
+
+	if [[ "$2" == .. ]]; then
+		COMPREPLY+=(..)
+	fi
+
+	if [[ "$2" != */* ]]; then
+		local extend_dirs_only=1
+		__pg_cd__entry_name_completion__helper "$@"
+
+		local -i i
+		for (( i=0 ; i < ${#COMPREPLY[*]} ; i++ ))
+			do
+				COMPREPLY[i]="${COMPREPLY[i]}/"
+			done
+	else
+		compopt -o filenames
+
+		local name="$(__pg_cd__get_entry_name "$2")"
+		local additional_path="$(__pg_cd__get_entry_path "$2")"
+
+		local base_path
+		case "$name" in
+					.)
+						base_path="$(__pg_cd__get_target_of_entry_or_last_used 2>/dev/null)"
+						;;
+					..)
+						base_path="$(__pg_cd__get_target_of_entry_or_last_used 2>/dev/null)/.."
+						;;
+					*)
+						base_path="$(__pg_cd__get_target_of_entry_or_last_used "$name" 2>/dev/null)"
+						;;
+				esac
+
+		local shopt_store="$(__pg_cd__shopts_save)"
+			shopt -s nullglob
+			shopt -s dotglob
+
+			local dir_slash
+			if (( "$extend_dirs_only" == 1 )); then
+				dir_slash='/'
+			fi
+			local possibilities=("$base_path/$additional_path"*$dir_slash)
+		__pg_cd__shopts_restore "$shopt_store"
+
+		local possibility
+		for possibility in "${possibilities[@]}"
+			do
+				local temp
+				temp="$name${possibility#"$base_path"}"
+				if [ "$dir_slash" ]; then
+					temp="${temp:0:-1}"
+				fi
+
+				if  [ -d "$possibility" ] && [ ! -d "$temp" ]; then
+					temp="$temp/"
+				fi
+				COMPREPLY+=("$temp")
+			done
+	fi
+}
+
+
+# Complete long options (e.g. --foobar)
+__pg_cd__long_args_cmpletion__helper()
+{
+	local option
+	local entered_so_far="$1"
+	shift
+
+	for option in "$@"
+		do
+			local selected
+			local -i skip=0
+			local -i i=0
+			for selected in "${COMP_WORDS[@]}"
+				do
+					if [ "$selected" == "$option" ] && (( $i != COMP_CWORD )); then
+						skip=1
+						break
+					fi
+					((i++))
+				done
+
+			if [[ "$option" == "$entered_so_far"* ]] && (( skip == 0 )); then
+				COMPREPLY+=($option)
+			fi
+		done
+}
+
+
+# Complete arguments to cdclean
+__pg_cd__cdclean_completion()
+{
+	local cur prev words cword
+	_init_completion || return
+
+
+	if (( $COMP_CWORD > 1 )); then
+		return 1
+	fi
+
+	local -r options=(
+		"--force-clean-missing"
+		"--force-remove-all"
+	)
+
+	__pg_cd__long_args_cmpletion__helper "$2" "${options[@]}"
+}
+
+
+# Complete arguments to cds
+__pg_cd__cds_completion()
+{
+	local cur prev words cword
+	_init_completion || return
+
+	case $COMP_CWORD in
+		1)
+			__pg_cd__entry_name_completion__helper "$@"
+			return
+			;;
+		2)
+			compopt -o dirnames
+			;;
+	esac
+}
+
+
+# Basic completion (for redirections only (<|>|>> etc.))
+__pg_cd__basic_completion()
+{
+	local cur prev words cword
+	_init_completion
+}
+
+__pg_cd__basic_path_completion_one_arg()
+{
+	local cur prev words cword
+	_init_completion || return
+
+	if (( $COMP_CWORD > 1 )); then
+		return 1
+	fi
+
+	compopt -o default
+}
+
+
+complete -o nospace -F __pg_cd__complete_entry_name_and_dirpath cdr
+complete -F __pg_cd__complete_entry_name cdremove
+complete -o nospace -F __pg_cd__complete_first_entry_name_and_filepath cdpath
+complete -F __pg_cd__cdclean_completion cdclean
+complete -F __pg_cd__cds_completion cds
+complete -F __pg_cd__basic_completion cdlist
+complete -F __pg_cd__basic_path_completion_one_arg cdimport
+complete -F __pg_cd__basic_completion cdexport
+
+
+__pg_cd__is_entry_name_valid()
+{
+	if [[ "$1" == ?(*/*|*@( |$'\n'|$'\t')*|.|..) ]]; then
+		return 1
+	fi
+
+	return 0
+}
+
+
+__pg_cd__normalize_path()
+{
+	if [ -z "$1" ]; then
+		echo "error: invalid path given: '(null)'." 1>&2
+		return 1
+	fi
+
+	local absolute_slash
+	if [[ "$1" == /* ]]; then
+		if [[ "$1" == //?([^/]*) ]]; then
+			absolute_slash="//"
+		else
+			absolute_slash="/"
+		fi
+	fi
+
+	local elements element
+	local i=0
+
+	while IFS= read -r -d "/" element; do       # note the '<<<' below
+		if [ -z "$element" ] || [ "$element" == "." ]; then
+			continue
+		fi
+
+		if [ "$element" == ".." ]; then
+			if (( i>0 )) && [[ "${elements[i-1]}" != ".." ]]; then
+				((i--))
+				unset elements[i]
+				continue
+			fi
+			if (( i == 0 )) && [ "$absolute_slash" ]; then
+				continue
+			fi
+		fi
+
+		elements[i]="$element"
+
+		((i++))
+	done  <<<"$1/"
+
+	if [ "$absolute_slash" != '/' ] && (( ${#elements[*]} == 0 )); then
+		echo -n '.'
+	fi
+
+	echo -n "$absolute_slash"
+
+	local slash=""
+	for element in "${elements[@]}"; do
+		echo -n "$slash$element"
+		slash='/'
+	done
+}
+
+
+__pg_cd__shopts_save()
+{
+	shopt -p
+}
+
+
+__pg_cd__shopts_restore()
+{
+	local IFS=$'\n'
+	set -- $1
+
+	local entry
+	for entry in "$@"
+		do
+			eval builtin $entry
+		done
+}
+
+
+__pg_cd__get_name_of_last_used()
+{
+	# returns -> true on success
+
+	if [ ! -f "$__pg_cd__config_path/last_used" ]; then
+		echo "error: No last used entry found." 1>&2
+		return 1
+	fi
+
+	echo "$(<"$__pg_cd__config_path/last_used")"
+	return
+}
+
+
+__pg_cd__set_name_of_last_used()
+{
+	echo "$1" >"$__pg_cd__config_path/last_used"
+}
+
+
+__pg_cd__print_invalid_entry_name()
+{
+	echo "error: Invalid name given '$1'. Name may not contain any spaces or slashes. Nor may it be '.' or '..'." 1>&2
+}
+
+
+__pg_cd__get_target_of_entry()
+{
+	if ! __pg_cd__is_entry_name_valid "$1"; then
+		__pg_cd__print_invalid_entry_name "$1"
+		return 1
+	fi
+
+	if ! readlink "$__pg_cd__link_path/$1" 2>/dev/null; then
+		echo "error: No such entry '$1'." 1>&2
+		return 1
+	fi
+
+	return 0
+}
+
+
+__pg_cd__create_entry()
+{
+	if ! __pg_cd__is_entry_name_valid "$1"; then
+		__pg_cd__print_invalid_entry_name "$1"
+		return 1
+	fi
+
+	if ! ln -sfn -- "$2" "$__pg_cd__link_path/$1" 2>/dev/null; then
+		echo "error: Unable to create entry '$1'." 1>&2
+		return 1
+	fi
+
+	return 0
+}
+
+
+__pg_cd__entry_exists()
+{
+	if [ ! -L "$__pg_cd__link_path/$1" ]; then
+		echo "error: No such entry '$1'." 1>&2
+		return 1
+	fi
+
+	return 0
+}
+
+
+__pg_cd__destroy_entry()
+{
+	local -i rc=0
+	local entry
+	for entry in "$@"
+		do
+			if ! __pg_cd__entry_exists "$entry"; then
+				rc=1
+				continue
+			fi
+
+			if ! rm -f -- "$__pg_cd__link_path/$entry" 2>/dev/null; then
+				rc=1
+				echo "error: Failed to remove entry '$entry'." 1>&2
+			fi
+		done
+
+	return $rc
+}
+
+
+__pg_cd__get_target_of_entry_or_last_used()
+{
+	if (( $# == 0 )) || [ -z "$1" ]; then
+		local last_used
+
+		if ! last_used="$(__pg_cd__get_name_of_last_used)"; then
+			echo "error: Last used entry unavailable." 1>&2
+			return 1
+		fi
+		set -- "$last_used"
+	fi
+
+	__pg_cd__get_target_of_entry "$1"
+	return
+}
+
+
+__pg_cd__get_entries_starting_with()
+{
+	eval $1=\(\)
+
+	if [ ! -d "$__pg_cd__link_path" ]; then
+		return 1
+	fi
+
+	local shopt_store="$(__pg_cd__shopts_save)"
+		shopt -s nullglob
+		shopt -s dotglob
+
+		local path
+		for path in "$__pg_cd__link_path/$2"*
+			do
+				local name="$(basename -- "$path")"
+
+				if [[ "$name" == @(.|..) ]]; then
+					continue
+				fi
+
+				eval $1+='("$name")'
+			done
+	__pg_cd__shopts_restore "$shopt_store"
+
+	return 0
+}
+
+
+__pg_cd__get_entry_name()
+{
+	echo "${1%%\/*}"
+}
+
+
+__pg_cd__get_entry_path()
+{
+	if [[ "$1" == */* ]]; then
+		echo "${1#*\/}"
+	fi
+}
+
+
+cds()
+{
+	if (( $# > 2 )); then
+		echo "error: Too many arguments given. No more than two expected." 1>&2
+		return 1
+	fi
+
+	if (( $# < 1 )); then
+		echo "error: Too few arguments. Expected one or two." 1>&2
+		return 1
+	fi
+
+	local path
+	if (( $# > 1 )); then
+		if [[ "$2" != /* ]]; then
+			path="$(__pg_cd__normalize_path "$(pwd)/$2")"
+		else
+			path="$(__pg_cd__normalize_path "$2")"
+		fi
+		if [ ! -d "$2" ]; then
+			echo "warning: Cannot find target directory. Proceeding anyway ..." 1>&2
+		fi
+	else
+		path="$(pwd)"
+	fi
+
+	__pg_cd__create_entry "$1" "$path" || return
+
+	__pg_cd__set_name_of_last_used "$1"
+}
+
+
+cdpath()
+{
+	local name="$(__pg_cd__get_entry_name "$1")"
+	local additional_path="$(__pg_cd__get_entry_path "$1")"
+	local base_path
+
+	if ! __pg_cd__is_entry_name_valid "$name"; then
+		additional_path="$name/$additional_path"
+		name=""
+	fi
+
+	base_path="$(__pg_cd__get_target_of_entry_or_last_used "$name")" || return
+
+	echo "$(__pg_cd__normalize_path "$base_path/$additional_path")"
+}
+
+
+cdr()
+{
+	if (( $# > 1 )); then
+		echo "error: Too many arguments given. Zero or one expected." 1>&2
+		return 1
+	fi
+
+	local name="$(__pg_cd__get_entry_name "$1")"
+
+	cd -- "$(cdpath "$1")" || return
+
+	if [ "$name" ]; then
+		__pg_cd__set_name_of_last_used "$name"
+	fi
+}
+
+
+cdlist()
+{
+	if (( $# )); then
+		echo "error: Too many arguments given. No arguments expected." 1>&2
+		return 1
+	fi
+
+	local -i has_nonexistent_target=0
+	local -i found_last_entry=0
+	local last_used="$(__pg_cd__get_name_of_last_used 2>/dev/null)"
+
+	echo "+---------------------------------------------------------------------+"
+	echo "|                      Available entries                              |"
+	echo "+---------------------------------------------------------------------+"
+
+	local -i counter=0
+
+	local shopt_store="$(__pg_cd__shopts_save)"
+		shopt -s nullglob
+		shopt -s dotglob
+
+		local entry
+		local entries; __pg_cd__get_entries_starting_with entries
+		for entry in "${entries[@]}"; do
+			local name="$(basename -- "$entry")"
+			local link_target="$(__pg_cd__get_target_of_entry_or_last_used "$name")"
+			local status_char=
+			local last_char=
+
+			if [ ! -d "$link_target" ]; then
+				status_char="#"
+				has_nonexistent_target=1
+			fi
+
+			if [ "$last_used" == "$name" ]; then
+				last_char='*'
+				found_last_entry=1
+			fi
+
+			((counter++))
+
+			printf "\t%-15s  -> %-2s %s\n" "$(basename -- "$entry")" "$status_char$last_char" "$link_target"
+		done
+	__pg_cd__shopts_restore "$shopt_store"
+
+	if ! ((counter)); then
+		echo -e "\t* No entry found. *"
+	fi
+
+	echo "-----------------------------------------------------------------------"
+
+	echo "Number of entries: $counter"
+	echo
+	if ((found_last_entry)); then
+		echo -e "* -> Last used entry."
+	fi
+	if ((has_nonexistent_target)); then
+		echo "# -> Target directory does not exist."
+	fi
+
+	return 0
+}
+
+
+cdclean()
+{
+	local -i rc=0
+	local missing		# array of entries with missing target
+	local all           # array of all entries
+	local answer
+
+	local arg
+	for arg in "$@"; do
+		case "$arg" in
+			--force-clean-missing)
+				if [ "$answer" ]; then
+					echo "error: The arguments --force-clean-missing and --force-remove-all are mutually exclusive." 1>&2
+					return 1
+				fi
+				answer="y"
+				;;
+			--force-remove-all)
+				if [ "$answer" ]; then
+					echo "error: The arguments --force-clean-missing and --force-remove-all are mutually exclusive." 1>&2
+					return 1
+				fi
+				answer="all"
+				;;
+			*)
+				echo "error: invalid argument: '$arg'." 1>&2
+				return 1
+				;;
+		esac
+	done
+
+	local shopt_store="$(__pg_cd__shopts_save)"
+		if [ -z "$answer" ]; then
+			echo "------------------------------------";
+		fi
+		shopt -s nullglob
+		shopt -s dotglob
+
+		local entry
+		local entries; __pg_cd__get_entries_starting_with entries
+		for entry in "${entries[@]}"; do
+				local name="$(basename -- "$entry")"
+				local link_target="$(__pg_cd__get_target_of_entry_or_last_used "$name")"
+
+				all+=("$(basename -- "$entry")")
+
+				if [ ! -d "$link_target" ]; then
+					printf "%-10s -> %s\n" "$name" "$link_target"
+					missing[${#missing[*]}]="$(basename -- "$entry")"
+				fi
+			done
+	__pg_cd__shopts_restore "$shopt_store"
+
+	if ((${#all[*]} == 0)); then
+		echo "info: Nothing to clean up."
+	else
+		if [ -z "$answer" ]; then
+			echo "------------------------------------"
+			echo "'y'   -> Remove entries with non-existent targets (as listed above if any)."
+			echo "'n'   -> Abort."
+			echo "'all' -> Remove all entries."
+			echo -n "Remove entries? [all|y|N] -> "
+			read answer
+		fi
+
+		local to_be_removed
+
+		case "$answer" in
+			[yY])
+					to_be_removed=("${missing[@]}")
+					;;
+
+			[Aa][Ll][Ll])
+				to_be_removed=("${all[@]}")
+				;;
+			*)
+				to_be_removed=()
+				echo "abort ..."
+				;;
+		esac
+
+		if ((${#to_be_removed[*]})); then
+			if __pg_cd__destroy_entry "${to_be_removed[@]}"; then
+					echo "Successfully removed entries."
+				else
+					rc=1
+				fi
+		fi
+
+	fi
+
+	return $rc
+}
+
+
+cdremove()
+{
+	if (($# == 0)); then
+		echo "error: Missing argument(s). At least one argument expected." 1>&2
+		return 1
+	fi
+
+	local name
+	for name in "$@";
+		do
+			__pg_cd__destroy_entry "$name" || return
+		done
+
+	return 0
+}
+
+
+cdexport()
+{
+	local path
+	local -i rc=0
+
+	if (( $# > 0 )); then
+		echo "error: Too many arguments given. None expected." 1>&2
+		return 1
+	fi
+
+	local shopt_store="$(__pg_cd__shopts_save)"
+		shopt -s nullglob
+		shopt -s dotglob
+
+		local entry
+		local entries; __pg_cd__get_entries_starting_with entries
+		for entry in "${entries[@]}"; do
+			local name="${entry/*\/}"
+
+			if ! path="$(cdpath "$name")"; then
+				echo "error: while processing entry '$name', skipping ..." 1>&2
+				rc=1
+				continue
+			fi
+
+			echo "$name/$path"
+		done
+	__pg_cd__shopts_restore "$shopt_store"
+
+	return $rc
+}
+
+
+cdimport()
+{
+	local line
+	local -i rc=0
+
+	if (( $# > 1 )); then
+		echo "error: Too many arguments given. Expected at most one." 1>&2
+		return 1
+	fi
+
+	local file_content
+	if ! file_content="$(cat -- "${1-"-"}" 2>/dev/null)"; then
+		echo "error: No such file '$1'" 1>&2
+		return 1
+	fi
+
+	local -i line_count=0
+	while IFS= read -r line
+		do
+			((line_count++))
+			if [[ "$line" != *?"/"?* ]]; then
+				echo "error: Line $line_count is malformed." 1>&2
+				rc=1
+				break
+			fi
+
+			local entry_name="${line%%/*}"
+			local entry_path="${line#*/}"
+
+			if ! __pg_cd__create_entry "$entry_name" "$entry_path"; then
+				echo "error: Unable to import line '$line_count'." 1>&2
+				rc=1
+				break
+			fi
+		done <<<"$file_content"
+
+	if (( rc )); then
+		echo "error: Aborted importing after error." 1>&2
+	fi
+
+	return $rc
+}
