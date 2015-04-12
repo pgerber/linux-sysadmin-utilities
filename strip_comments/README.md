@@ -2,14 +2,14 @@
 
 ## Description
 
-Strip successive commented-out lines and empty lines from files.
+Strip comments and empty lines from files.
 
 ## Capabilities
 * Detect characters used to introduce comments based on filename
 * Detect characters used to introduce comments based on shebang. (Shebangs or those things: #!/bin/bash)
-* reduce adjacent empty and comment-only lines to one line or optionally remove them completely.
-* print line numbers
-* tons of options for flexibility. Use ***strip_comments --help*** to learn more.
+* Reduce adjacent empty and comment-only lines to one line or optionally remove them completely.
+* Print line numbers
+* Tons of options for flexibility. Use ***strip_comments --help*** to learn more.
 
 ## Sample
 Here is a excerpt from a TOR config file I found on one of my machines. It's pretty hard to find the actual configuration part.
@@ -53,7 +53,7 @@ Nickname arbitrary1
 ContactInfo 4B45 672A E4D1 5C01 E663 E826 3E51 19FB 0B2C 1DFB Peter Gerber <peter@tschoerbi.ch>
 ```
 
-Now let's see what happens if we pass the file to strip_comments using the following command: **strip_comments -n torrc**. It a little easier to read, isn't it? The line number are often pretty useful too.
+Now let's see what happens if we pass the file to strip_comments using the following command: **strip_comments -n torrc**. It's a little easier to read, isn't it? The line number are often pretty useful too.
 
 ```
        7 | ORPort 443 NoListen
