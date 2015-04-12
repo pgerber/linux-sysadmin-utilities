@@ -5,7 +5,7 @@ Hello there, here you'll find some more or less useful stuff I've written over t
 ## What's to be Found Here
 
 ### cd_enhanced
-Everybody knows how cumbersome it can be to use **cd* to change directories Especially, when you need to change to ones that are nested deep within the filesystem hierarchy.
+Everybody knows how cumbersome it can be to use **cd** to change directories. Especially, when you need to change to ones that are nested deeply within the filesystem hierarchy.
 To help with this, I created a script or rather a set of bash function that provide you with bookmark functionality.
 
 See readme in cd_enhanced directory for details

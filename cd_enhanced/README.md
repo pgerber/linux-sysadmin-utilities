@@ -2,7 +2,7 @@
 
 ## Description
 
-Everybody knows how cumbersome it can be to use **cd* to change directories Especially, when you need to change to ones that are nested deep within the filesystem hierarchy.
+Everybody knows how cumbersome it can be to use **cd** to change directories. Especially, when you need to change to ones that are nested deeply within the filesystem hierarchy.
 To help with this, I created a script or rather a set of bash function that provide you with bookmark functionality.
 
 ## Installation Process
@@ -47,7 +47,7 @@ List the currently defined bookmarks.
 ### cdexport
 Syntax: **cdexport**
 
-Export bookmarks in a format that can later be used for readding with **cdimport**. Export data is printed to stdout.
+Export bookmarks in a format that can be used for importing with **cdimport** later on. Export data is printed to stdout.
 
 ### cdimport
 Syntax: **cdimport [INPUT_FILE]**
@@ -57,11 +57,11 @@ Reimport bookmarks previously exported by **cdexport**. Without an INPUT_FILE gi
 ## How it works
 
 ```bash
-# add working directory to bookmarks
+# add bookmark for the shell's working directory
 $ cd ~/src/linux-utilities
 $ cds git
 
-# add a specific path to bookmarks
+# add bookmark for a specific path
 $ cds v28 ~/src/nice_v2.8
 
 # change to directory
@@ -70,7 +70,7 @@ $ cdr git
 $ pwd
 /home/peter/src/linux-utilities
 
-# change directly to subdirectory (hint: use tab for auto-completion)
+# change directly to a subdirectory (hint: use tab for auto-completion)
 $ cd /
 $ cdr git/cd_enhanced
 $ pwd

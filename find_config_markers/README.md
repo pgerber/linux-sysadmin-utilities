@@ -8,12 +8,12 @@ Find sections within configuration files that are enclosed with special markers
 * Find section of files that were marked previously.
 * Scan through directories recursively.
 * The markers can be nested. Can't remember why I implemented that. It just seems so useless. But it works.
-* To find out about more options execute **find_config_markers --help**
+* To find out about more options, execute **find_config_markers --help**.
 
 ## Basics
 Often you'll change some configuration option and then, when you want to change it again, you can't find it anymore. To avoid exactly that, I created this script.
 
-To show you how it works, let's look at an openssh server configuration I adjusted a while ago. Below you see a shortened version of such the file.
+To show you how it works, let's look at an openssh server configuration I adjusted a while ago. Below you see a shortened version of the file.
 As you can see there are two sections marked using **# -- mark begin --** and **# -- mark end --**.
 
 ```
@@ -97,5 +97,5 @@ Alternatively to the syntax used for the marker so far, the following syntax may
 ; -- mark begin --
 /* -- mark begin -- */
 #--mark begin--
-    # -- mark begin -- Whatever is right of the -- is ignored. Spaces and tabs on the left are just fine too.
+    # -- mark begin -- Whatever is right of the -- is ignored. Spaces and tabs on the very left are just fine too.
 ```
