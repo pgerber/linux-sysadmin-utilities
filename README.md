@@ -2,10 +2,10 @@
 
 Hello there, here you'll find some more or less useful stuff I've written over the years.
 
-## What's to Find Here
+## What's to be Found Here
 
 ### cd_enhanced
-Everybody knows how cumbersome it can be to use **cd* to change directories when you need to change to ones that are nested deep within the filesystem hierarchy.
+Everybody knows how cumbersome it can be to use **cd* to change directories Especially, when you need to change to ones that are nested deep within the filesystem hierarchy.
 To help with this, I created a script or rather a set of bash function that provide you with bookmark functionality.
 
 See readme in cd_enhanced directory for details
@@ -23,7 +23,7 @@ I use it to mark sections in config files that I have modified. With this script
 See readme in find_config_markers directory for details.
 
 ### strip_comments
-A small Python program to display files without lines that are completely commented out. It also has some more advanced features like displaying line numbers. Or Detecting sequences of intermixed empty lines and comments that it just reduces to but one single line for brevity.
+A small Python program to display files without all the lines that are commented out. It also has some more advanced features like displaying line numbers. Or Detecting sequences of intermixed empty lines and comments that it just reduces to but one single line for brevity.
 
 It has proven to be quite useful in order to remove comments from configuration files. Many of them consist mainly of empty lines and comment. Oftentimes, seeing the actual config and nothing else is all you want.
 

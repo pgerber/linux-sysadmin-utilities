@@ -11,8 +11,9 @@ Strip comments and empty lines from files.
 * Print line numbers
 * Tons of options for flexibility. Use ***strip_comments --help*** to learn more.
 
-## Sample
+## How to Use It
 Here is a excerpt from a TOR config file I found on one of my machines. It's pretty hard to find the actual configuration part.
+Most of it is just comment that we more often than not simply don't care about.
 ```
 ## Required: what port to advertise for incoming Tor connections.
 # ORPort 443
@@ -53,16 +54,16 @@ Nickname arbitrary1
 ContactInfo 4B45 672A E4D1 5C01 E663 E826 3E51 19FB 0B2C 1DFB Peter Gerber <peter@tschoerbi.ch>
 ```
 
-Now let's see what happens if we pass the file to strip_comments using the following command: **strip_comments -n torrc**. It's a little easier to read, isn't it? The line number are often pretty useful too.
+Now let's see what happens when we pass the file to strip_comments using the following command: **strip_comments -n torrc**. It's a little easier to read, isn't it? The line number are often pretty useful too.
 
 ```
        7 | ORPort 443 NoListen
        9 | ORPort 9001 NoAdvertise
       10 | ORPort [2a01:4f8:101:10ab:6ca1:a8f6:cd6a:6255]:9001
-         | 
+         |
       14 | Address tor-exit1.arbitrary.ch
-         | 
+         |
       17 | Nickname arbitrary1
-         | 
+         |
       37 | ContactInfo 4B45 672A E4D1 5C01 E663 E826 3E51 19FB 0B2C 1DFB Peter Gerber <peter@tschoerbi.ch>
 ```

@@ -2,10 +2,10 @@
 
 ## Description
 
-Everybody knows how cumbersome it can be to use **cd* to change directories when you need to change to ones that are nested deep within the filesystem hierarchy.
+Everybody knows how cumbersome it can be to use **cd* to change directories Especially, when you need to change to ones that are nested deep within the filesystem hierarchy.
 To help with this, I created a script or rather a set of bash function that provide you with bookmark functionality.
 
-## Installation process
+## Installation Process
 
 In order for this to work you'll need to add the following to the **end** of your ~/.bashrc file.
 
@@ -17,12 +17,12 @@ if [ -f "$HOME/scripts/cd_extended" ]; then
 fi
 ```
 
-## Functions provided by cd_enhanced
+## Functions Provided by cd_enhanced
 
 ### cds
 Syntax: **cds ENTRY_NAME [PATH]**
 
-Add a bookmark called ENTRY_NAME that points to PATH. If PATH is not given, it will point to the current working directory.
+Add a bookmark called ENTRY_NAME that points to PATH. If PATH is not given, it will point to the working directory.
 
 ### cdr
 Syntax: **cdr [ENTRY_NAME]**
@@ -42,12 +42,12 @@ Remove the bookmarks named ENTRY_NAME.
 ### cdlist
 Syntax: **cdlist**
 
-List the currently defined bookmarks
+List the currently defined bookmarks.
 
 ### cdexport
 Syntax: **cdexport**
 
-Export bookmarks in a format that can later be readded with **cdimport**. Export data is printed to stdout.
+Export bookmarks in a format that can later be used for readding with **cdimport**. Export data is printed to stdout.
 
 ### cdimport
 Syntax: **cdimport [INPUT_FILE]**

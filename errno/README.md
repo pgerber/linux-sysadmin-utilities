@@ -2,17 +2,17 @@
 
 ## Description
 
-Print error description for given errno
+Print error description assoziated with specific errno error numbers.
+
 
 ## How it works
-
 
 ```bash
 # Description of just one errno error code
 $ errno 12
  12 --> Cannot allocate memory
 
-# Description of multiple error codes
+# Descriptions of multiple error codes
 $ errno 2 4
   2 --> No such file or directory
   4 --> Interrupted system call
