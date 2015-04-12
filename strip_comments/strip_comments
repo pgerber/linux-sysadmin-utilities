@@ -1,0 +1,455 @@
+#!/usr/bin/env python3
+
+'''
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+    © 2014 Peter Gerber <peter@arbitrary.ch>
+'''
+
+
+import os, sys, re, getopt, traceback, resource, inspect, warnings, itertools, struct, termios, fcntl, shutil
+
+
+# dbgprint() and debug_mode is overridden if --debug option is specified
+debug_mode = False
+def dbgprint(*args, **kwargs):
+	pass
+
+
+
+### Regular expression for filtering comments. ###
+regex_empty       = re.compile(r'\s*$')
+regex_hash        = re.compile(r'\s*#')
+regex_slashslash  = re.compile(r'\s*\/\/')
+regex_semicolon   = re.compile(r'\s*;')
+regex_semicolon2  = re.compile(r'\s*;([^;]|$)')     # note: Removing comments starting with two adjacent semicolons is a bad idea as this combination is regularly found in bash case statements
+regex_percentage  = re.compile(r'\s*%')
+regex_dashdash    = re.compile(r'\s*--')
+
+regex_default_filters = ( regex_hash, regex_slashslash, regex_semicolon2 )
+
+
+
+### Regular expressions to assign comment filters based on filename ###                      # INFO: Processed successively; first match wins.
+                                                                                             # INFO: All paths are converted to normalized absolute paths before they are matched against the given regex.
+fname_filter_matches = (
+	( re.compile(r'^/etc/bind/[^/]+\.conf(\.[^/]+)?$'),   ( regex_hash, regex_semicolon )  ),  # filter bind config files
+	( re.compile(r'\.[ch](pp)?$'),                        ( regex_slashslash, )            ),  # filter C/C++ code
+	( re.compile(r'\.py$'),                               ( regex_hash, )                  ),  # filter python code
+	( re.compile(r'\.sh$'),                               ( regex_hash, )                  ),  # filter shell scripts
+	( re.compile(r'\.tex$'),                              ( regex_percentage, )            ),  # filter tex files
+	( re.compile(r'\.php$'),                              ( regex_slashslash, regex_hash ) ),  # filter php files
+	( re.compile(r'\.asm$'),                              ( regex_semicolon, )             ),  # filter assembler files
+	( re.compile(r'\.go$'),                               ( regex_slashslash, )            ),  # filter go files
+	( re.compile(r'\.sql$'),                              ( regex_dashdash, )              )   # filter sql files
+)
+
+
+### Regular expression to assign comment filters based on shebang ###             # INFO: (^|/) is required in case /usr/bin/env is used in shebang
+                                                                                  # INFO: Processed successively; first match wins.
+shebang_filter_matches = (
+	( re.compile(r'(^|/)(([bd]?a|z|t?c)?sh)$'),  ( regex_hash, )                  ),  # filter shells
+	( re.compile(r'(^|/)python[0-9.]*$'),        ( regex_hash, )                  ),  # filter python
+	( re.compile(r'(^|/)g?awk$'),                ( regex_hash, )                  ),  # filter awk
+	( re.compile(r'(^|/)sed$'),                  ( regex_hash, )                  ),  # filter sed
+	( re.compile(r'(^|/)perl[0-9.]$'),           ( regex_hash, )                  ),  # filter perl
+	( re.compile(r'(^|/)ruby[0-9.]$'),           ( regex_hash, )                  ),  # filter ruby
+	( re.compile(r'(^|/)php[0-9.]$'),            ( regex_hash, regex_slashslash ) )   # filter php
+)
+
+
+
+## Strip comments from a file or stream
+#
+#	See usage() for details
+#
+# @param file            File or stream to read from. May be of type os.TextIOBaseMay or any type derived thereof.
+# @param filters         Iterable containing the comment filters.
+# @param max_line_length Maximum length, in characters, of a line within file that will not raise a IOError exception. -1 disables limit. (Be warned, lines are loaded into memory in their entirety.)
+# @param discard_empty   If True, discard all empty lines. Otherwise, successive empty lines or empty lines intermixed with comments are reduced to but one empty line.
+# @param show_line_no    If True, line numbers are printed.
+def process_file(file=sys.stdin, *, filters=None, discard_empty=False, max_line_length=4096, show_line_no=False):
+	content_started = False       # False until the first non-empty and non-comment line is encountered. Used to skip empty/comment line at beginning.
+	print_newline = False
+
+	dbgprint("Processing file='%s' with filters=%s, discard_empty=%s and max_line_length=%d" % (file.name, [ a.pattern for a in filters ] if filters else None, discard_empty, max_line_length) )
+
+	### If no filter is given as argument, try to find a filter based on file's name or path ###
+	if filters == None:    # note: if filters are disabled filters contains an empty set()
+		if file.seekable() and file is not sys.stdin:                   # note: This does not fully guarantee that a file.name is set to the actual path of the file, but does make it very likely.
+			filters = get_comment_filters_based_on_filename(file.name)
+
+	line_no = 0
+	for line in iter(lambda : file.readline(max_line_length), ''):
+		line_no += 1
+		# enforce line length limit
+		if not line.endswith('\n') and file.read(1) != '':
+			raise IOError("Length of line within file '%s' exceeds limit of %d characters." % ( file.name, max_line_length ))
+
+		line = line.rstrip('\n')
+
+		# While processing first line, if no filter is set yet, try to pick a filter based on shebang.
+		if filters == None and line_no == 1:
+			filters = get_comment_filters_based_on_shebang(line)
+
+			# Still no filter found? Use default filters as a last resort.
+			if filters == None:
+				dbgprint('Unable to find filter for file %s. Enable default filters: %s.' % (file.name, [ a.pattern for a in regex_default_filters ] ) )
+				filters = regex_default_filters
+
+		# Discard empty lines and remember to add a single empty line if requested.
+		if regex_empty.match(line):
+			if not discard_empty:
+				print_newline = True
+			continue
+
+		# discard comments
+		for filter in filters:
+			if filter.match(line):
+				break
+		else:
+			# Reduce successive empty lines or empty lines intermixed with comments to but one empty line.
+			if print_newline and content_started:
+				print_line('', print_line_numbers=show_line_no)
+
+			print_line(line, line_no, show_line_no)
+
+			content_started = True
+			print_newline = False
+
+
+
+## Get comment filters based on file's name or path
+#
+# The first filter matching the given path is returned. Before applying the regex fname is converted to an absolute path; all matching operations take place on the resulting path.
+#
+# @param fname Filename or path.
+#
+# @return If any matching filters are found, a iterable of compiled regular expressions containing the applicable comment filters is returned. Otherwise, None is returned.
+def get_comment_filters_based_on_filename(fname):
+	for match in fname_filter_matches:		# there may be multiple matches in which case all found filters are enabled
+		if match[0].search(os.path.abspath(fname)):
+			dbgprint( "selected filters for file %s based on filename, filename matches to regex '%s', adding filters: %s " % ( fname, match[0].pattern, [ a.pattern for a in match[1] ]) )
+			return match[1]
+
+	return None
+
+
+
+## Get comment filters based on shebang
+#
+# Return the first comment-filter matching the given shebang_line.
+#
+# @param shebang_line Line suspected to contain a shebang.
+#
+# @return If any filters matching the shebang are found, a iterable of compiled regular expressions containing the applicable comment filters is returned.
+#         Otherwise, if no match is found or the line is not a valid shebang, None is returned.
+def get_comment_filters_based_on_shebang(shebang_line):
+	if not shebang_line.startswith('#!'):
+		return None
+
+	try:
+		split = shebang_line[2:].strip().split()
+
+		if split[0] == '/usr/bin/env':
+			progname = split[1]
+		else:
+			progname = split[0]
+	except IndexError:
+		dbgprint("Failed to parse shebang: '%s'" % shebang_line)
+		return None
+
+	for match in shebang_filter_matches:
+		if match[0].search(progname):
+			dbgprint( "Selected filters based interpreter '%s' given in shebang. Interpreter matched to regex '%s', adding comment filters: %s " % ( progname, match[0].pattern, [ a.pattern for a in match[1] ]) )
+			return match[1]
+
+	return None
+
+
+
+## Print one line
+#
+# Print a line from the configuration file, optionally with line numbers.
+#
+# In case line numbers are enabled, tabs are replaced with 8 spaces, by default, to emulate the look that is expected on a Linux terminal. If this wasn't done,
+# the indentation of tabs might be shifted thus causing a file containing space and tab-based indentation to misalign.
+#
+# Additionally, if line numbering is enabled and the line needs to be split onto multiple lines in order to fit into the terminal, the indentation
+# for printing the line number is retained on the next line(s).
+#
+# An example output:
+#    ++++++++++++++++++++++++++++++++++++++++++++++++++++
+#    +    1 | This is the first line. Still the first li+
+#    +      | ine; just split onto two line to fit.     +
+#    +    2 | Now the second line starts                +
+#    ++++++++++++++++++++++++++++++++++++++++++++++++++++
+#
+#    The pluses indicate the terminal border
+#
+#
+# @param line                The content of the line to print.
+# @param line_no             The line number of the line to print
+# @param print_line_numbers  If True, line numbers are printed. Otherwise, no line numbers are printed
+# #param line_no_indent      Number of characters to indent to make space to show line numbers
+def print_line(line, line_no='', print_line_numbers=False, line_no_indent=8):
+
+	# WARNING: the number subtracted must be synchronized with number of characters needed to print line numbers. See WARNING further down.
+	max_breadth = get_terminal_breadth() - (3+line_no_indent)
+
+	chunk_iter = iter((line,))
+	if print_line_numbers:
+		if max_breadth > 0:
+			line_space = ''
+			index = 0
+			for char in line:
+				if char == '\t':
+					space = line_no_indent-index%line_no_indent
+					line_space += ' '*space
+					index += space
+				else:
+					line_space += char
+					index += 1
+
+			chunk_iter = (line_space[a:a+max_breadth] for a in range(0, len(line_space), max_breadth))
+
+		# WARNING: changes to the length of pattern string below must be synchronized with the number subtracted when max_breadth is assigned a value further up
+		print("%*s | " % (line_no_indent, line_no), end='')
+	print(next(chunk_iter, ''))
+
+	for chunk in chunk_iter:
+		print(' '*9 + '| ' + chunk)
+
+
+
+## Attempt to figure out the breadth of the terminal
+#
+# @return If the breadth of the terminal can be detected, it is returned. Otherwise, if the detection fails, 0 is returned.
+def get_terminal_breadth():
+	if hasattr(shutil, 'get_terminal_size'):
+		return shutil.get_terminal_size((0, 0)).columns
+
+
+	# NOTE: The function used above, namely shutil.get_terminal_size() is only available starting with python version 3.3.
+	# To ensure compatibility, the following fallback implementation is still retain until any such time that adoption of
+	# of version 3.3 or newer is commonplace.
+
+	try:
+		struct_pattern = 'hh'
+		structure = b'x'*struct.calcsize( struct_pattern )
+		terminal_height, terminal_width = struct.unpack( struct_pattern, fcntl.ioctl( sys.stdout.fileno(), termios.TIOCGWINSZ, structure ))
+		return terminal_width
+	except:
+		return 0
+
+
+
+## Print usage information
+#
+def usage():
+
+	# limit breadth of text printed to 50 columns
+	def usage_arg(marker, short, long, text):
+		if short != '':
+			short = short + ','
+
+		while text != '':
+			next_text = text[:51]
+			try:
+				if len(next_text) > 50:
+					next_text = next_text[:next_text.rindex(' ')]
+			except ValueError:
+				pass			# ignore exceptions thrown by method rindex() if there is no ' ' in the given text
+			text = text[len(next_text):].strip()
+			print( " %1s %3s %-21s %s" % (marker, short, long, next_text) )
+
+			marker = ''
+			short = ''
+			long  = ''
+
+	print( "Usage: %s [OPTION]... [--] [FILENAME]...\n" % sys.argv[0] )
+
+	print( 'Arguments mandatory to long options are mandatory for short options too.' )
+	usage_arg( '',  '-c', '--semicolon',          'Enable filter to remove comments starting with a semicolon (;).')
+	usage_arg( '*', '-C', '--semicolon-single',   'Enable filter to remove comments starting with a semicolon (;). Lines starting with two successive semicolons are ignored, as this is very commonly used in bash case statements.' )
+	usage_arg( '',  '-d', '--dash-dash',          'Enable filter to remove comments starting with two successive dashes (--)' )
+	usage_arg( '',  '-e', '--discard-empty',      'Remove all empty lines. By default multiple adjacent empty lines or empty lines intermixed with comment lines are reduced to but one single line.' )
+	usage_arg( '*', '-h', '--hash',               'Enable filter to remove comments starting with a hash (#).' )
+	usage_arg( '',  '-H', '--help',               'Show this text and exit.' )
+	usage_arg( '',  '-N', '--no-default-filters', 'Do not use default filters as fall-back. May be used in combination with -e in order to remove empty lines only.' )
+	usage_arg( '*', '-s', '--slash-slash',        'Enable filter to remove comments starting with two successive slashes (//).' )
+	usage_arg( '',  '-p', '--percentage',         'Enable filter to remove comments starting with a percentage sign (%).' )
+	usage_arg( '',  '-r', '--regex REGEX',        "Use regular expression given by REGEX as a filter to decide whether a line is a comment. White space at beginning is ignored automatically by prefixing '\s*' to the regular expression. Option may be given multiple times." )
+	usage_arg( '',  '-n', '--line-numbers',       "Show line numbers.")
+	usage_arg( '',  '',   '--info',               'Print information about filename and shebang matching and exit.' )
+	usage_arg( '',  '',   '--debug',              "Enable debug messages, print stack traces on exceptions and enable python's internal warnings." )
+	print()
+	print( 'All whitespace characters before comments and within otherwise empty lines\n' \
+	       + 'are ignored.' )
+	print()
+	print( 'If one or more FILENAMEs are given, comment stripping is done on those files.\n' \
+	       + 'If none is given, comment stripping is done on stdin.' )
+	print()
+	print( 'If no filter OPTION is given, filters are chosen as follows:' )
+	print( '  1. If a FILENAME is given, attempt to guess the best filters based on the file\'s name or path.' )
+	print( '  2. On failure, attempt to guess the best filters based on the shebang if there is any.' )
+	print( '  3. On failure, use default filters, marked above by an asterisk (*).' )
+
+
+
+## Print basic information about the mappings between shebangs and filenames and their respective comment-filter rules.
+def info():
+	# Width of first column (longest line in first column + 5)
+	width = 5 + max( (len(a[0].pattern) for a in itertools.chain(fname_filter_matches, shebang_filter_matches)) )
+
+	print(" DEFAULT FILTERS ".center(75, '*'))
+	print("\t" + ', '.join(("'"+regex.pattern+"'" for regex in regex_default_filters)))
+	print()
+
+	print(" FILENAME/PATH BASED COMMENT FILTERING ".center(75, '*'))
+	print("\t%-*s  %s" % (width, 'filename regex', 'comment regex'))
+	for file_regex, comment_regexes in fname_filter_matches:
+		print("\t%s %s" % (("'"+file_regex.pattern+"' ").ljust(width, '·'), ', '.join(("'"+regex.pattern+"'" for regex in comment_regexes))))
+	print()
+
+	print(" SHEBANG BASED COMMENT FILTERING ".center(75, '*'))
+	print("\t%-*s  %s" % (width, 'shebang regex', 'comment regex'))
+	for interpreter_regex, comment_regexes in shebang_filter_matches:
+		print("\t%s %s" % (("'"+interpreter_regex.pattern+"' ").ljust(width, '·'), ', '.join(("'"+regex.pattern+"'" for regex in comment_regexes))))
+
+
+
+## Process arguments
+#
+# @return A tuple containing a tuple of filenames and a dictionary of arguments, prepared for handing over to process_file() as arguments, is returned.
+def process_arguments():
+	discard_empty = False
+	use_default_filters_as_fallback = True
+	show_line_no = False
+
+	options, non_opt_args = getopt.gnu_getopt( sys.argv, 'cdehHNnspr:', longopts=('help','semicolon', 'semicolon-single', 'dash-dash', \
+		'discard-empty','hash','slash-slash', 'percentage-sign', 'no-default-filters', 'regex=', 'info', 'debug', 'line-numbers') )
+
+	filters = set()
+	for key, value in options:
+		if key in ('-H', '--help'):
+			usage()
+			leave(1)
+		elif key in ('-c', '--semicolon'):
+			filters.add(regex_semicolon)
+		elif key in ('-C', '--semicolon-single'):
+			file_regex.add(regex_semicolon2)
+		elif key in ('-e', '--discard-empty'):
+			discard_empty = True
+		elif key in ('-h', '--hash'):
+			filters.add(regex_hash)
+		elif key in ('-s', '--slash-slash'):
+			filters.add(regex_slashslash)
+		elif key in ('-p', '--percentage-sign'):
+			filters.add(regex_percentage)
+		elif key in ('-d', '--dash-dash'):
+			filters.add(regex_dashdash)
+		elif key in ('-N', '--no-default-filters'):
+			use_default_filters_as_fallback = False
+		elif key in ('-n', '--line-numbers'):
+			show_line_no = True
+		elif key in ('-r', '--regex'):
+			try:
+				expression = '\s*' + value
+				filter = re.compile(expression)
+			except re.error as e:
+				eprint("error: failed to compile regular expression '%s': %s" % (expression, e) )
+				leave(1)
+
+			filters.add(filter)
+		elif key == '--info':
+			info()
+			leave(1)
+		elif key == '--debug':
+			# Enable python internal warnings
+			warnings.simplefilter('default')
+
+			global debug_mode
+			debug_mode = True
+
+			# Override dummy function previously defined
+			global dbgprint
+			def dbgprint(*args, **kwargs):
+				caller_info = inspect.getouterframes(inspect.currentframe())[1]
+
+				eprint("debug: %-55s" % (caller_info[1] + ':' + "%-4d" % caller_info[2] + ' ' + caller_info[3] + '()'), *args, **kwargs)
+		else:
+			raise ValueError("Unknown option in arguments:", key)
+
+	if use_default_filters_as_fallback and len(filters) == 0:
+		filters = None             # None indicates that the filter is to be chosen by auto-detection
+
+	return non_opt_args, { 'discard_empty' : discard_empty, 'filters' : filters, 'show_line_no': show_line_no }
+
+
+
+## Print message on stderr
+#
+def eprint(*args, **kwargs):
+	kwargs['file'] = sys.stderr
+	print(*args, **kwargs)
+
+
+
+## Exit program
+#
+def leave(ret):
+	if ret != 0:
+		dbgprint("exiting with non-zero return value %d" % ret)
+	exit(ret)
+
+
+
+if __name__ == '__main__':
+	try:
+
+		# process arguments
+		non_opt_args, kwargs = process_arguments()
+
+		if len(non_opt_args) > 1:
+			# processing input files
+
+			arg_iter = iter(non_opt_args)
+			next(arg_iter)
+
+			for fname in arg_iter:
+				with open(fname) as f:
+					process_file(f, **kwargs)
+		else:
+			# processing stdin
+
+			process_file(**kwargs)
+
+	except KeyboardInterrupt:
+		dbgprint("Caught KeyboardInterrupt")
+		leave(1)
+	except getopt.GetoptError as e:
+		eprint(e)
+		leave(1)
+	except Exception as e:
+		if debug_mode:
+			eprint('*'*100)
+			eprint(traceback.format_exc(), end='')
+			eprint('*'*100)
+		else:
+			eprint("Use --debug to see full stack trace." )
+
+		eprint("error: Caught exception of class '%s': %s." % (e.__class__.__name__, e))
+
+		leave(1)
