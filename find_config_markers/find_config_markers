@@ -1,0 +1,407 @@
+#!/usr/bin/env python3
+
+'''
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+    © 2014 Peter Gerber <peter@arbitrary.ch>
+'''
+
+
+import os, sys, re, getopt, io, struct, fcntl, termios, shutil
+
+
+
+# Used by parse_file()
+class ParserError(Exception):
+	pass
+
+
+
+## print message on stderr
+def eprint(*args, **kwargs):
+	kwargs.setdefault('file', sys.stderr)
+	print(*args, **kwargs)
+
+
+
+# regular expression that identifies a marker
+# group 1: comment introduction character(s)
+# group 2: marker type
+marker_regex = re.compile(r'\s*(#+|;+|//+|/\*+)\s*--\s*mark\s+([^-\s]+)\s*--')
+
+
+## Represents a single line
+class Line:
+	def __init__(self, file, line, line_no):
+		self._line    = line.rstrip('\n')
+		self._file    = file
+		self._line_no = line_no
+
+		match = marker_regex.match(line)
+		if match:
+			self._type = match.groups()[1]
+
+		else:
+			self._is_marker = False
+			self._comment_closer = None
+			self._type = None
+
+	def get_line_no(self):
+		return self._line_no
+
+	def is_marker(self):
+		return self._is_marker
+
+	## Get type of comment
+	# @returns string representing marker type (e.g. 'begin', 'end')
+	def get_type(self):
+		return self._type
+
+	## Get file object (io.IOBase object)
+	def get_file(self):
+		return self._file
+
+	## get line content
+	def __str__(self):
+		return self._line
+
+	## Return slice of line
+	def __getitem__(self, slice_obj):
+		return self._line[slice_obj]
+
+	## get length of line
+	def __len__(self):
+		return len(self._line)
+
+
+
+## Used to collect application-wide statistical data
+#
+class ParserStatus():
+	def __init__(self):
+		self._total_line_count = 0
+		self._printed_line_count = 0
+		self._error_count = 0
+
+	def inc_total_line_count(self, count=1):
+		self._total_line_count += count
+
+	def inc_printed_line_count(self, count=1):
+		self._printed_line_count += count
+
+	def inc_error_count(self, count=1):
+		self._error_count += count
+
+	def get_total_line_count(self, count=1):
+		return self._total_line_count
+
+	def get_printed_line_count(self, count=1):
+		return self._printed_line_count
+
+	def get_error_count(self, count=1):
+		return self._error_count
+
+
+
+## Parse given file
+# @param file                 May either be a str with a path to a file to be opened or an io.IOBase file object.
+# @param parser_status        Instance of ParserStatus that is used to keep track of error count and other statistical information.
+# @param print_line_numbers   If true, line numbers are printed.
+# @param print_filenames      If true, the filename is printed. But only if file actually contains a marker.
+# @param supress_errors       If true, all error printing is supressed with exception of fatal errors.
+# @param print_content        If true, content within begin and end markers is printed. Can be set to False to only print filenames.
+# @param max_line_length      Max. length of a line before processing of the file is aborted. -1 for unlimited. WARNING: Lines are loaded into memory in their entirety.
+#
+# @exception An IOError is thrown if and only if the opening of the file fails. Any other exception that may occur during normal operation is converted to a ParserError.
+def parse_file(file, parser_status, *, print_line_numbers=True, print_filenames=False, supress_errors=False, print_content=True, max_line_length=4096):
+	file_needs_closing = False
+
+	def error(*args, **kwargs):
+		parser_status.inc_error_count()
+		if supress_errors == False:
+			eprint(*args, **kwargs)
+
+	try:
+		if isinstance(file, str):
+			file_needs_closing = True
+			file = open(file)
+
+		found_match = False         # True if a marker was found within the file
+		marker_stack = []           # Used to keep track of nested begin / end markers
+		line_no = 0
+		for line_str in iter(lambda : file.readline(max_line_length), ''):
+			if not line_str.endswith('\n') and file.read(1) != '':
+				raise ParserError("Maximum line length of %d characters exceeded in file '%s'" % (max_line_length, file.name))
+
+			line_no += 1
+			line = Line(file, line_str, line_no)
+			parser_status.inc_total_line_count()
+
+			line_type = line.get_type()
+			if line_type == 'begin':
+				# Print empty line between two markers
+				if found_match and len(marker_stack) == 0:
+					print_line('', print_line_numbers=print_line_numbers)
+
+				marker_stack.append(line)
+
+				if found_match == False:
+					found_match = True
+					if print_filenames:
+						if parser_status.get_printed_line_count() > 0:
+							# print empty line between files
+							print()
+						if print_content:
+							print("File: ", end='')
+						print(file.name)
+
+			elif line_type == 'end':
+				if len(marker_stack) >= 1:
+					begin_marker = marker_stack.pop()
+
+				else:
+					error("error: Ignoring unmatched end marker on line %d within file '%s'." % (line.get_line_no(), file.name))
+					continue
+			elif line_type != None:
+					error("error: Hit unknown marker of type '%s' on line %d within file %s." % (line_type, line.get_line_no(), file.name))
+			else:
+				if len(marker_stack) > 0:
+					if print_content:
+						print_line(line, line.get_line_no(), print_line_numbers)
+						parser_status.inc_printed_line_count()
+
+		if len(marker_stack):
+			lines = ', '.join((str(marker.get_line_no()) for marker in marker_stack))
+			error("error: Unmatched begin markers at end of file '%s'. Markers unclosed were opened on line(s): %s." % (file.name, lines))
+	except UnicodeDecodeError as e:
+		raise ParserError("Failed to parse file '%s' using encoding %s: %s" % (file.name, e.encoding, e.reason)) from e
+	except IOError as e:
+		if not isinstance(file, io.IOBase):
+			# Exception during opening of file.
+			raise e
+
+		raise ParserError(e) from e
+	finally:
+		# Only close files that were opened within the realms of this function.
+		if file_needs_closing and isinstance(file, io.IOBase):
+			file.close()
+
+
+
+def walk_directory(base_path, parser_status, **kwargs_for_parser):
+	supress_errors = kwargs_for_parser.setdefault('supress_errors', False)
+
+	def error_handler(e, errors_to_add=1):
+		parser_status.inc_error_count()
+
+		# If base_path (topmost directory) cannot be processed, an error message is printed in any case.
+		if supress_errors == False or isinstance(e, IOError) and os.path.samefile(base_path, e.filename):
+			eprint("error:", e)
+
+	kwargs_for_parser.setdefault('print_filenames', True)
+
+	for dirpath, dirnames, filenames in os.walk(base_path, onerror=error_handler):
+		for filename in filenames:
+			path = os.path.join(dirpath, filename)
+			if os.path.isfile(path):
+				try:
+					parse_file(path, parser_status, **kwargs_for_parser)
+				except ( ParserError, IOError ) as e:
+					# note: IOError is only thrown if opening a file fails.
+					error_handler(e)
+
+
+
+## Print one line
+#
+# Print a line from the configuration file, optionally with line numbers.
+#
+# In case line numbers are enabled, tabs are replaced with 8 spaces, by default, to emulate the look that is expected on a Linux terminal. If this wasn't done,
+# the indentation of tabs might be shifted thus causing a file containing space and tab-based indentation to misalign.
+#
+# Additionally, if line numbering is enabled and the line needs to be split onto multiple lines in order to fit into the terminal, the indentation
+# for printing the line number is retained on the next line(s).
+#
+# An example output:
+#    ++++++++++++++++++++++++++++++++++++++++++++++++++++
+#    +    1 | This is the first line. Still the first li+
+#    +      | ine; just split onto two line to fit.     +
+#    +    2 | Now the second line starts                +
+#    ++++++++++++++++++++++++++++++++++++++++++++++++++++
+#
+#    The pluses indicate the terminal border
+#
+#
+# @param line                The content of the line to print.
+# @param line_no             The line number of the line to print
+# @param print_line_numbers  If True, line numbers are printed. Otherwise, no line numbers are printed
+# #param line_no_indent      Number of characters to indent to make space to show line numbers
+def print_line(line, line_no='', print_line_numbers=False, line_no_indent=8):
+	# WARNING: the number subtracted must be synchronized with number of characters needed to print line numbers. See WARNING further down.
+	max_breadth = get_terminal_breadth() - (3+line_no_indent)
+
+	chunk_iter = iter((line,))
+	if print_line_numbers:
+		if max_breadth > 0:
+			line_space = ''
+			index = 0
+			for char in line:
+				if char == '\t':
+					space = line_no_indent-index%line_no_indent
+					line_space += ' '*space
+					index += space
+				else:
+					line_space += char
+					index += 1
+
+			chunk_iter = (line_space[a:a+max_breadth] for a in range(0, len(line_space), max_breadth))
+
+		# WARNING: changes to the length of pattern string below must be synchronized with the number subtracted when max_breadth is assigned a value further up
+		print("%*s | " % (line_no_indent, line_no), end='')
+	print(next(chunk_iter, ''))
+
+	for chunk in chunk_iter:
+		print(' '*9 + '| ' + chunk)
+
+
+
+## Attempt to figure out the breadth of the terminal
+#
+# @return If the breadth of the terminal can be detected, it is returned. Otherwise, if the detection fails, 0 is returned.
+def get_terminal_breadth():
+	if hasattr(shutil, 'get_terminal_size'):
+		return shutil.get_terminal_size((0, 0)).columns
+
+
+	# NOTE: The function used above, namely shutil.get_terminal_size() is only available starting with python version 3.3.
+	# To ensure compatibility, the following fallback implementation is still retain until any such time that adoption of
+	# of version 3.3 or newer is commonplace.
+
+	try:
+		struct_pattern = 'hh'
+		structure = b'x'*struct.calcsize( struct_pattern )
+		terminal_height, terminal_width = struct.unpack( struct_pattern, fcntl.ioctl( sys.stdout.fileno(), termios.TIOCGWINSZ, structure ))
+		return terminal_width
+	except:
+		return 0
+
+
+
+## Print usage information
+def usage():
+	print("Usage: %s [OPTION]... [FILENAME]..." % sys.argv[0])
+	print()
+	print("\t-f, --no-filenames     Do not print filenames. Default if only one FILENAME is specified and it is not a directory.")
+	print("\t-h, --help             Print this text.")
+	print("\t-l, --no-line-numbers  Do not print line numbers.")
+	print("\t-n, --filenames-only   Only print name of files that contain markers but none of the content.")
+	print("\t-q, --quiet            Suppress non-fatal errors. Errors are considered fatal if a path given as argument cannot be opened.")
+	print("\t-r, --recursive        Walk through directories recursively. Requires at least one FILENAME to be specified.")
+	print("\t-s, --stats            Show statistics.")
+
+
+
+if __name__ == '__main__':
+
+	# Thrown if arguments cannot be processed
+	class OptionError(Exception):
+		pass
+
+	# used to keep stats
+	parser_status = ParserStatus()
+
+	try:
+		recursive = False
+		print_stats = False
+		args_for_parser = {
+			'print_filenames'    : True,
+			'print_content'      : True,
+			'print_line_numbers' : True,
+			'supress_errors'     : False,
+		}
+
+		try:
+			opts, args = getopt.gnu_getopt(sys.argv, 'fhlnqrs', [ 'filenames-only', 'help', 'no-filenames', 'no-line-numbers', 'quiet', 'recursive', 'stats'])
+		except getopt.error as e:
+			raise OptionError(e) from e
+
+		for key, value in opts:
+			if key in ( '-f', '--no-filename' ):
+				args_for_parser['print_filenames'] = False
+			elif key in ( '-l', '--no-line-numbers' ):
+				args_for_parser['print_line_numbers'] = False
+			elif key in ( '-n', '--filenames-only' ):
+				args_for_parser['print_content'] = False
+			elif key in ( '-q', '--quiet' ):
+				args_for_parser['supress_errors'] = True
+			elif key in ( '-r', '--recursive' ):
+				args_for_parser['print_line_numbers'] = True
+				recursive = True
+			elif key in ( '-s', '--stats' ):
+				print_stats = True
+			elif key in ( '-h', '--help' ):
+				usage()
+				exit(1)
+			else:
+				raise ValueError("Unknown option: '%s'" % key)
+
+		if recursive and len(args) <= 1:
+			raise OptionError("In recursive mode (-r/--recursive) at least one filename must be specified.")
+
+		if len(args) > 1:
+			files = iter(args)
+			next(files)             # Skip first argument as it is this programs name (= sys.argv[0]).
+		else:
+			files = (sys.stdin, )
+
+		for file in files:
+			if recursive and os.path.isdir(file):
+				walk_directory(file, parser_status, **args_for_parser)
+			else:
+				try:
+					if len(args) <= 2:
+						args_for_parser['print_filenames'] = False
+
+					parse_file(file, parser_status, **args_for_parser)
+				except ParserError as e:
+					parser_status.inc_error_count()
+					if args_for_parser['supress_errors'] == False:
+						eprint("error:", e)
+				except IOError as e:
+					parser_status.inc_error_count()
+					# IOError is only thrown if opening of the file failed.
+					# We don't want to suppress this error, ever!
+					eprint("error:", e)
+
+	except (KeyboardInterrupt) as e:
+		if parser_status.get_error_count() > 0:
+			if parser_status.get_printed_line_count() > 0:
+				eprint()
+			eprint("error: Encountered %d errors so far." % parser_status.get_error_count())
+		exit(1)
+	except OptionError as e:
+		eprint("error:", e)
+		eprint("error: Use --help for more information.")
+		exit(1)
+
+	if print_stats:
+		if parser_status.get_printed_line_count() > 0:
+			eprint()
+		eprint("info: Printed %d lines out of a total of %d processed." % (parser_status.get_printed_line_count(), parser_status.get_total_line_count()))
+
+	if parser_status.get_error_count():
+		if parser_status.get_printed_line_count() > 0 and print_stats == False:
+			eprint()
+		eprint("error: Encountered %d errors." % parser_status.get_error_count())
+		exit(2)

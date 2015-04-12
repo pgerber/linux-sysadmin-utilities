@@ -9,3 +9,10 @@ A small Python program to display files without lines that are completely commen
 It has proven to be quite useful in order to remove comments from configuration files. Many of them consist mainly of empty lines and comment. Oftentimes, seeing the actual config and nothing else is all you want.
 
 See readme in strip_comments directory for details.
+
+### find_config_markers
+Python script that allows to find and print specially marked section in config files. Sections within configuration files can be marked using very simple markers.
+
+I use it to mark sections in config files that I have modified. With this script I can easily find them again. Even recursive searches through directories are possible.
+
+See readme in find_config_markers directory for details.
