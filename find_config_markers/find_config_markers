@@ -151,7 +151,7 @@ def parse_file(file, parser_status, *, print_line_numbers=True, print_filenames=
 			line_type = line.get_type()
 			if line_type == 'begin':
 				# Print empty line between two markers
-				if found_match and len(marker_stack) == 0:
+				if found_match and len(marker_stack) == 0 and print_content:
 					print_line('', print_line_numbers=print_line_numbers)
 
 				marker_stack.append(line)
