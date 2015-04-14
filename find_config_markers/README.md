@@ -8,7 +8,7 @@ Find sections within configuration files that are enclosed with special markers
 * Find section of files that were marked previously.
 * Scan through directories recursively.
 * The markers can be nested. Can't remember why I implemented that. It just seems so useless. But it works.
-* To find out about more options, execute **find_config_markers --help**.
+* To find out about more options, execute ```find_config_markers --help```.
 
 ## Basics
 Often you'll change some configuration option and then, when you want to change it again, you can't find it anymore. To avoid exactly that, I created this script.
@@ -48,7 +48,7 @@ Match Group srv-backup
 
 ```
 
-Now we use **find_config_markers /etc/ssh/sshd_config** to just look at the part enclosed by the markers. Here's the output:
+Now we use ```find_config_markers /etc/ssh/sshd_config``` to just look at the part enclosed by the markers. Here's the output:
 
 ```
       52 | PasswordAuthentication no
@@ -63,7 +63,7 @@ Now we use **find_config_markers /etc/ssh/sshd_config** to just look at the part
      100 |        ForceCommand internal-sftp
 ```
 
-As mentioned before, it can be used recursively. Here is a partial output of **find_config_markers -qr /etc** executed on one of my machines:
+As mentioned before, it can be used recursively. Here is a partial output of ```find_config_markers -qr /etc``` executed on one of my machines:
 ```
 File: /etc/tsocks.conf
       43 | server = 127.0.0.1
