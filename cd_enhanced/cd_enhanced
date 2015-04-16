@@ -616,10 +616,6 @@ cdr()
 	local path
 	path=$(cdpath "$1") || return
 	cd -- "$path" || return
-
-	if [ "$name" ]; then
-		__pg_cd__set_name_of_last_used "$name"
-	fi
 }
 
 
