@@ -206,7 +206,7 @@ def walk_directory(base_path, parser_status, **kwargs_for_parser):
 		parser_status.inc_error_count()
 
 		# If base_path (topmost directory) cannot be processed, an error message is printed in any case.
-		if supress_errors == False or isinstance(e, IOError) and os.path.samefile(base_path, e.filename):
+		if supress_errors == False or isinstance(e, IOError) and base_path == e.filename:
 			eprint("error:", e)
 
 	kwargs_for_parser.setdefault('print_filenames', True)
@@ -236,7 +236,7 @@ def walk_directory(base_path, parser_status, **kwargs_for_parser):
 # An example output:
 #    ++++++++++++++++++++++++++++++++++++++++++++++++++++
 #    +    1 | This is the first line. Still the first li+
-#    +      | ine; just split onto two line to fit.     +
+#    +      | ne; just split onto two lines to fit.     +
 #    +    2 | Now the second line starts                +
 #    ++++++++++++++++++++++++++++++++++++++++++++++++++++
 #
