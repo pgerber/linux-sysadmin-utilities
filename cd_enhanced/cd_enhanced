@@ -596,11 +596,10 @@ cds()
 
 cdpath()
 {
-	local name
 	__pg_cd__cdpath_no_remember_last_used "$1" || return
 
-	if [ "$1" != "${1-}" ]; then
-		__pg_cd__set_name_of_last_used "$name"
+	if [ $# -ge 1 ]; then
+		__pg_cd__set_name_of_last_used "$1"
 	fi
 }
 
