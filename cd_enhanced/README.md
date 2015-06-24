@@ -12,8 +12,8 @@ In order for this to work you'll need to add the following to the **end** of you
 You, of course, need to adjust the path should you place the script somewhere else.
 
 ```bash
-if [ -f "$HOME/scripts/cd_extended" ]; then
-     . "$HOME/scripts/cd_extended"
+if [ -f "$HOME/scripts/cd_enhanced" ]; then
+     . "$HOME/scripts/cd_enhanced"
 fi
 ```
 
