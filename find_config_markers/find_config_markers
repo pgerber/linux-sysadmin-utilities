@@ -18,7 +18,7 @@
 '''
 
 
-import os, sys, re, getopt, io, struct, fcntl, termios, shutil
+import os, sys, re, getopt, itertools, io, struct, fcntl, termios, shutil
 
 
 
@@ -300,28 +300,44 @@ def get_terminal_breadth():
 
 ## Print usage information
 def usage():
-	print("Usage: %s [OPTION]... [FILENAME]..." % sys.argv[0])
+	print("Usage: %s [OPTION]... [PATH]..." % sys.argv[0])
 	print()
-	print("\t-f, --no-filenames     Do not print filenames. Default if only one FILENAME is specified and it is not a directory.")
+	print("\t-f, --no-filenames     Do not print filenames. Default if only one PATH is specified and it is not a directory.")
+	print("\t-F  --file-from=FILE   Read paths with files/directories to search from given FILE. If file is '-' paths are read from stdin.")
+	print("\t                       Paths must be regular files unless -r/--recursive is specified also. May be given multiple times.")
 	print("\t-h, --help             Print this text.")
 	print("\t-l, --no-line-numbers  Do not print line numbers.")
 	print("\t-n, --filenames-only   Only print name of files that contain markers but none of the content.")
 	print("\t-q, --quiet            Suppress non-fatal errors. Errors are considered fatal if a path given as argument cannot be opened.")
-	print("\t-r, --recursive        Walk through directories recursively. Requires at least one FILENAME to be specified.")
+	print("\t-r, --recursive        Walk through directories recursively. Requires at least one PATH to be specified.")
 	print("\t-s, --stats            Show statistics.")
 
 
 
 if __name__ == '__main__':
 
+	def filenames_from_file(file_path):
+		try:
+			with open(file_path) as file:
+				for filename in file:
+					yield filename.rstrip()
+		except Exception as e:
+			raise FileFromError(e)
+
 	# Thrown if arguments cannot be processed
 	class OptionError(Exception):
+		pass
+
+	# Thrown if from file could no be read (see --from-file)
+	class FileFromError(Exception):
 		pass
 
 	# used to keep stats
 	parser_status = ParserStatus()
 
 	try:
+		files_from = []
+		search_path_iters=[]
 		recursive = False
 		print_stats = False
 		args_for_parser = {
@@ -332,13 +348,19 @@ if __name__ == '__main__':
 		}
 
 		try:
-			opts, args = getopt.gnu_getopt(sys.argv, 'fhlnqrs', [ 'filenames-only', 'help', 'no-filenames', 'no-line-numbers', 'quiet', 'recursive', 'stats'])
+			opts, args = getopt.gnu_getopt(sys.argv, 'fF:hlnqrs', \
+			          [ 'filenames-only', 'file-from=', 'help', 'no-filenames', 'no-line-numbers', 'quiet', 'recursive', 'stats'])
 		except getopt.error as e:
 			raise OptionError(e) from e
 
 		for key, value in opts:
 			if key in ( '-f', '--no-filename' ):
 				args_for_parser['print_filenames'] = False
+			elif key in ( '-F', '--file-from' ):
+				if value == '-':
+					files_from.append(iter(lambda : sys.stdin.readline().rstrip(), ''))
+				else:
+					files_from.append(filenames_from_file(value))
 			elif key in ( '-l', '--no-line-numbers' ):
 				args_for_parser['print_line_numbers'] = False
 			elif key in ( '-n', '--filenames-only' ):
@@ -356,21 +378,23 @@ if __name__ == '__main__':
 			else:
 				raise ValueError("Unknown option: '%s'" % key)
 
+
 		if recursive and len(args) <= 1:
 			raise OptionError("In recursive mode (-r/--recursive) at least one filename must be specified.")
 
-		if len(args) > 1:
-			files = iter(args)
-			next(files)             # Skip first argument as it is this programs name (= sys.argv[0]).
+		if len(args) > 1 or files_from:
+			arg_iter = iter(args)
+			next(arg_iter)             # Skip first argument as it is this programs name (= sys.argv[0]).
 		else:
-			files = (sys.stdin, )
+			arg_iter = (sys.stdin, )
 
-		for file in files:
+
+		for file in itertools.chain(arg_iter, *files_from):
 			if recursive and os.path.isdir(file):
 				walk_directory(file, parser_status, **args_for_parser)
 			else:
 				try:
-					if len(args) <= 2:
+					if len(args) <= 2 and not files_from:
 						args_for_parser['print_filenames'] = False
 
 					parse_file(file, parser_status, **args_for_parser)
@@ -393,6 +417,10 @@ if __name__ == '__main__':
 	except OptionError as e:
 		eprint("error:", e)
 		eprint("error: Use --help for more information.")
+		exit(1)
+	except FileFromError as e:
+		eprint(e)
+		eprint("arborting ...")
 		exit(1)
 
 	if print_stats:
